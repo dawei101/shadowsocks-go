@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -80,7 +82,7 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 		idVer   = 0
 		idCmd   = 1
 		idType  = 3 // address type index
-		idIP0   = 4 // ip addres start index
+		idIP0   = 4 // ip address start index
 		idDmLen = 4 // domain address length index
 		idDm0   = 5 // domain address start index
 
@@ -172,12 +174,8 @@ func parseServerConfig(config *ss.Config) {
 	}
 
 	if len(config.ServerPassword) == 0 {
-		method := config.Method
-		if config.Auth {
-			method += "-auth"
-		}
 		// only one encryption table
-		cipher, err := ss.NewCipher(method, config.Password)
+		cipher, err := ss.NewCipher(config.Method, config.Password)
 		if err != nil {
 			log.Fatal("Failed generating ciphers:", err)
 		}
@@ -315,7 +313,7 @@ func handleConnection(conn net.Conn) {
 	remote, err := createServerConn(rawaddr, addr)
 	if err != nil {
 		if len(servers.srvCipher) > 1 {
-			log.Println("Failed connect to all avaiable shadowsocks server")
+			log.Println("Failed connect to all available shadowsocks server")
 		}
 		return
 	}
@@ -325,8 +323,8 @@ func handleConnection(conn net.Conn) {
 		}
 	}()
 
-	go ss.PipeThenClose(conn, remote)
-	ss.PipeThenClose(remote, conn)
+	go ss.PipeThenClose(conn, remote, nil)
+	ss.PipeThenClose(remote, conn, nil)
 	closed = true
 	debug.Println("closed connection to", addr)
 }
@@ -352,26 +350,85 @@ func enoughOptions(config *ss.Config) bool {
 		config.LocalPort != 0 && config.Password != ""
 }
 
+func parseURI(u string, cfg *ss.Config) (string, error) {
+	if u == "" {
+		return "", nil
+	}
+	invalidURI := errors.New("invalid URI")
+	// ss://base64(method:password)@host:port
+	// ss://base64(method:password@host:port)
+	u = strings.TrimLeft(u, "ss://")
+	i := strings.IndexRune(u, '@')
+	var headParts, tailParts [][]byte
+	if i == -1 {
+		dat, err := base64.StdEncoding.DecodeString(u)
+		if err != nil {
+			return "", err
+		}
+		parts := bytes.Split(dat, []byte("@"))
+		if len(parts) != 2 {
+			return "", invalidURI
+		}
+		headParts = bytes.SplitN(parts[0], []byte(":"), 2)
+		tailParts = bytes.SplitN(parts[1], []byte(":"), 2)
+
+	} else {
+		if i+1 >= len(u) {
+			return "", invalidURI
+		}
+		tailParts = bytes.SplitN([]byte(u[i+1:]), []byte(":"), 2)
+		dat, err := base64.StdEncoding.DecodeString(u[:i])
+		if err != nil {
+			return "", err
+		}
+		headParts = bytes.SplitN(dat, []byte(":"), 2)
+	}
+	if len(headParts) != 2 {
+		return "", invalidURI
+	}
+
+	if len(tailParts) != 2 {
+		return "", invalidURI
+	}
+	cfg.Method = string(headParts[0])
+	cfg.Password = string(headParts[1])
+	p, e := strconv.Atoi(string(tailParts[1]))
+	if e != nil {
+		return "", e
+	}
+	cfg.ServerPort = p
+	return string(tailParts[0]), nil
+
+}
+
 func main() {
 	log.SetOutput(os.Stdout)
 
-	var configFile, cmdServer, cmdLocal string
+	var configFile, cmdServer, cmdURI string
 	var cmdConfig ss.Config
 	var printVer bool
 
 	flag.BoolVar(&printVer, "version", false, "print version")
 	flag.StringVar(&configFile, "c", "config.json", "specify config file")
 	flag.StringVar(&cmdServer, "s", "", "server address")
-	flag.StringVar(&cmdLocal, "b", "", "local address, listen only to this address if specified")
+	flag.StringVar(&cmdConfig.LocalAddress, "b", "", "local address, listen only to this address if specified")
 	flag.StringVar(&cmdConfig.Password, "k", "", "password")
 	flag.IntVar(&cmdConfig.ServerPort, "p", 0, "server port")
 	flag.IntVar(&cmdConfig.Timeout, "t", 300, "timeout in seconds")
 	flag.IntVar(&cmdConfig.LocalPort, "l", 0, "local socks5 proxy port")
 	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-256-cfb")
 	flag.BoolVar((*bool)(&debug), "d", false, "print debug message")
-	flag.BoolVar(&cmdConfig.Auth, "A", false, "one time auth")
+	flag.StringVar(&cmdURI, "u", "", "shadowsocks URI")
 
 	flag.Parse()
+
+	if s, e := parseURI(cmdURI, &cmdConfig); e != nil {
+		log.Printf("invalid URI: %s\n", e.Error())
+		flag.Usage()
+		os.Exit(1)
+	} else if s != "" {
+		cmdServer = s
+	}
 
 	if printVer {
 		ss.PrintVersion()
@@ -380,11 +437,6 @@ func main() {
 
 	cmdConfig.Server = cmdServer
 	ss.SetDebug(debug)
-
-	if strings.HasSuffix(cmdConfig.Method, "-auth") {
-		cmdConfig.Method = cmdConfig.Method[:len(cmdConfig.Method)-5]
-		cmdConfig.Auth = true
-	}
 
 	exists, err := ss.IsFileExists(configFile)
 	// If no config file in current directory, try search it in the binary directory
@@ -425,6 +477,5 @@ func main() {
 	}
 
 	parseServerConfig(config)
-
-	run(cmdLocal + ":" + strconv.Itoa(config.LocalPort))
+	run(config.LocalAddress + ":" + strconv.Itoa(config.LocalPort))
 }

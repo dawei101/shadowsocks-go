@@ -1,6 +1,6 @@
 # shadowsocks-go
 
-Current version: 1.1.5 [![Build Status](https://travis-ci.org/shadowsocks/shadowsocks-go.png?branch=master)](https://travis-ci.org/shadowsocks/shadowsocks-go)
+Current version: 1.2.2 [![Build Status](https://travis-ci.org/shadowsocks/shadowsocks-go.png?branch=master)](https://travis-ci.org/shadowsocks/shadowsocks-go)
 
 shadowsocks-go is a lightweight tunnel proxy which can help you get through firewalls. It is a port of [shadowsocks](https://github.com/clowwindy/shadowsocks).
 
@@ -36,7 +36,7 @@ server          your server ip or hostname
 server_port     server port
 local_port      local socks5 proxy port
 method          encryption method, null by default (table), the following methods are supported:
-                    aes-128-cfb, aes-192-cfb, aes-256-cfb, bf-cfb, cast5-cfb, des-cfb, rc4-md5, chacha20, salsa20, rc4, table
+                    aes-128-cfb, aes-192-cfb, aes-256-cfb, bf-cfb, cast5-cfb, des-cfb, rc4-md5, rc4-md5-6, chacha20, salsa20, rc4, table
 password        a password used to encrypt transfer
 timeout         server option, in seconds
 ```
@@ -57,10 +57,7 @@ AES is recommended for shadowsocks-go. [Intel AES Instruction Set](http://en.wik
 
 ### One Time Auth
 
-Append `-auth` to the encryption method to enable [One Time Auth (OTA)](https://shadowsocks.org/en/spec/one-time-auth.html).
-
-- For server: this will **force client use OTA**, non-OTA connection will be dropped. Otherwise, both OTA and non-OTA clients can connect
-- For client: the `-A` command line option can also enable OTA
+OTA function is deprecated because it is reported to have potential security risk.
 
 ## Command line options
 
